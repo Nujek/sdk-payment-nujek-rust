@@ -1,0 +1,15 @@
+[package]
+name = "nujek-merchant-api"
+version = "0.1.0"
+edition = "2021"
+description = "Rust client for Nujek payment-core merchant API"
+license = "MIT"
+
+[dependencies]
+hex = "0.4"
+hmac = "0.12"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2"
