@@ -34,6 +34,44 @@ pub fn sign(
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// Verifies `X-Nujek-Signature` over `timestamp.raw_body` and rejects stale requests.
+pub fn verify_webhook_signature(
+    timestamp: i64,
+    raw_body: &[u8],
+    signature: &str,
+    webhook_secret: &str,
+    now: i64,
+    max_age_seconds: i64,
+) -> bool {
+    if (now - timestamp).abs()
+        > if max_age_seconds > 0 {
+            max_age_seconds
+        } else {
+            300
+        }
+    {
+        return false;
+    }
+    let expected = sign_webhook(timestamp, raw_body, webhook_secret);
+    let provided = signature.strip_prefix("sha256=").unwrap_or(signature);
+    let Ok(provided) = hex::decode(provided) else {
+        return false;
+    };
+    provided.len() == expected.len()
+        && provided
+            .iter()
+            .zip(expected.iter())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+fn sign_webhook(timestamp: i64, raw_body: &[u8], secret: &str) -> Vec<u8> {
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts keys of any length");
+    mac.update(format!("{}.", timestamp).as_bytes());
+    mac.update(raw_body);
+    mac.finalize().into_bytes().to_vec()
+}
+
 #[derive(Debug)]
 pub enum Error {
     InvalidBaseUrl(url::ParseError),
@@ -319,5 +357,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(q.to_string(), "status=pending+paid&page=2");
+    }
+    #[test]
+    fn webhook_signature_is_verified() {
+        let body = br#"{"event":"bill.paid"}"#;
+        let mut mac = HmacSha256::new_from_slice(b"whsec_test").unwrap();
+        mac.update(b"1700000000.");
+        mac.update(body);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+        assert!(verify_webhook_signature(
+            1700000000,
+            body,
+            &signature,
+            "whsec_test",
+            1700000000,
+            300
+        ));
     }
 }
