@@ -4,6 +4,7 @@ use hmac::{Hmac, Mac};
 use reqwest::{Client as HttpClient, Method, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use rust_decimal::Decimal;
+use time::OffsetDateTime;
 use sha2::Sha256;
 use std::{
     fmt,
@@ -77,7 +78,14 @@ fn sign_webhook(timestamp: i64, raw_body: &[u8], secret: &str) -> Vec<u8> {
 pub enum Error {
     InvalidBaseUrl(url::ParseError),
     Request(reqwest::Error),
-    Response { status: StatusCode, body: String },
+    Response {
+        status: StatusCode,
+        error_code: Option<String>,
+        message: String,
+        request_id: Option<String>,
+        retry_after: Option<u64>,
+        body: String,
+    },
     Decode(serde_json::Error),
     InvalidEndpoint,
 }
@@ -86,8 +94,12 @@ impl fmt::Display for Error {
         match self {
             Self::InvalidBaseUrl(e) => write!(f, "nujek merchant API: invalid base URL: {e}"),
             Self::Request(e) => write!(f, "nujek merchant API: request failed: {e}"),
-            Self::Response { status, body } => {
-                write!(f, "nujek merchant API: HTTP {status}: {body}")
+            Self::Response { status, error_code, message, request_id, .. } => {
+                write!(f, "nujek payment API: HTTP {status}")?;
+                if let Some(code) = error_code { write!(f, " [{code}]")?; }
+                write!(f, ": {message}")?;
+                if let Some(id) = request_id { write!(f, " (request_id={id})")?; }
+                Ok(())
             }
             Self::Decode(e) => write!(f, "nujek merchant API: decode response: {e}"),
             Self::InvalidEndpoint => write!(f, "nujek merchant API: endpoint must start with /"),
@@ -95,6 +107,21 @@ impl fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+impl Error {
+    pub fn status(&self) -> Option<StatusCode> { match self { Self::Response { status, .. } => Some(*status), _ => None } }
+    pub fn error_code(&self) -> Option<&str> { match self { Self::Response { error_code, .. } => error_code.as_deref(), _ => None } }
+    pub fn request_id(&self) -> Option<&str> { match self { Self::Response { request_id, .. } => request_id.as_deref(), _ => None } }
+    pub fn message(&self) -> Option<&str> { match self { Self::Response { message, .. } => Some(message), _ => None } }
+    /// Returns a bounded response body suitable for diagnostics; request payloads are never stored here.
+    pub fn body(&self) -> Option<&str> { match self { Self::Response { body, .. } => Some(body), _ => None } }
+    pub fn retry_after(&self) -> Option<u64> { match self { Self::Response { retry_after, .. } => *retry_after, _ => None } }
+    pub fn is_conflict(&self) -> bool { self.status() == Some(StatusCode::CONFLICT) }
+    pub fn is_not_found(&self) -> bool { self.status() == Some(StatusCode::NOT_FOUND) }
+    pub fn is_retryable(&self) -> bool {
+        matches!(self.status(), Some(StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_EARLY | StatusCode::TOO_MANY_REQUESTS))
+            || self.status().is_some_and(|status| status.is_server_error())
+    }
+}
 
 #[derive(Clone)]
 pub struct Client {
@@ -166,11 +193,24 @@ impl Client {
         }
         let response = request.body(payload).send().await.map_err(Error::Request)?;
         let status = response.status();
+        let request_id_header = response.headers().get("x-request-id").and_then(|v| v.to_str().ok()).map(str::to_owned);
+        let retry_after_header = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
         let bytes = response.bytes().await.map_err(Error::Request)?;
         if !status.is_success() {
+            let body_text = String::from_utf8_lossy(&bytes).into_owned();
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+            let message = parsed.get("message").and_then(|v| v.as_str())
+                .or_else(|| parsed.get("error").and_then(|v| v.as_str()))
+                .unwrap_or("API request failed").to_string();
+            let error_code = parsed.get("error_code").and_then(|v| v.as_str()).map(str::to_owned)
+                .or_else(|| parsed.get("code").and_then(|v| v.as_str()).map(str::to_owned));
             return Err(Error::Response {
                 status,
-                body: String::from_utf8_lossy(&bytes).into_owned(),
+                error_code,
+                message,
+                request_id: request_id_header,
+                retry_after: retry_after_header,
+                body: body_text.chars().take(4096).collect(),
             });
         }
         serde_json::from_slice(&bytes).map_err(Error::Decode)
@@ -254,15 +294,71 @@ fn encode_path(value: &str) -> String {
 pub struct Envelope<T> {
     pub data: T,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BillStatus {
+    Pending,
+    Paid,
+    Settled,
+    Expired,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UserStatus {
+    Active,
+    Inactive,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletMutationStatus {
+    Completed,
+    Pending,
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Currency {
+    #[serde(rename = "IDR")]
+    Idr,
+    #[serde(rename = "USD")]
+    Usd,
+    #[serde(rename = "EUR")]
+    Eur,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum QrisStatus {
+    Active,
+    Inactive,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PayoutStatus {
+    Pending,
+    Processing,
+    Success,
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateBillRequest {
     pub external_id: String,
     pub channel_id: String,
     pub total: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub currency: Option<String>,
+    pub currency: Option<Currency>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expired_at: Option<String>,
+    pub expired_at: Option<OffsetDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -287,16 +383,16 @@ pub struct MerchantUser {
     pub name: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
-    pub status: String,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
+    pub status: UserStatus,
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserWallet {
     pub available: Decimal,
     pub pending: Decimal,
     pub locked: Decimal,
-    pub currency: String,
+    pub currency: Currency,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserCreated {
@@ -321,11 +417,11 @@ pub struct UserListItem {
     pub name: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
-    pub status: String,
+    pub status: UserStatus,
     pub available: Decimal,
     pub pending: Decimal,
     pub locked: Decimal,
-    pub created_at: Option<String>,
+    pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserList {
@@ -346,7 +442,7 @@ pub struct WalletMutationResponse {
     pub amount: Decimal,
     pub balance_before: Decimal,
     pub balance_after: Decimal,
-    pub status: String,
+    pub status: WalletMutationStatus,
     pub reference_id: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -357,14 +453,21 @@ pub struct WalletTransactionLookup {
     pub amount: Decimal,
     pub balance_before: Decimal,
     pub balance_after: Decimal,
-    pub status: String,
-    pub created_at: Option<String>,
+    pub status: WalletMutationStatus,
+    pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WalletTransactionType {
     Topup,
     Debit,
+    Transfer,
+    Payin,
+    Payout,
+    Settlement,
+    Correction,
+    #[serde(other)]
+    Unknown,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletTransaction {
@@ -373,9 +476,9 @@ pub struct WalletTransaction {
     pub idempotency_key: String,
     pub reference_id: String,
     #[serde(rename = "type")]
-    pub transaction_type: String,
+    pub transaction_type: WalletTransactionType,
     pub description: Option<String>,
-    pub created_at: Option<String>,
+    pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletTransactionList {
@@ -403,7 +506,7 @@ pub struct CreatePayoutRequest {
     pub destination_name: String,
     pub amount: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub currency: Option<String>,
+    pub currency: Option<Currency>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bill {
@@ -413,14 +516,14 @@ pub struct Bill {
     pub total: Option<Decimal>,
     pub total_fee: Option<Decimal>,
     pub net_amount: Option<Decimal>,
-    pub currency: Option<String>,
-    pub status: String,
+    pub currency: Option<Currency>,
+    pub status: BillStatus,
     pub bank_reference_no: Option<String>,
     pub payment_value: Option<String>,
     pub bank_status: Option<String>,
-    pub paid_at: Option<String>,
-    pub expired_at: Option<String>,
-    pub created_at: Option<String>,
+    pub paid_at: Option<OffsetDateTime>,
+    pub expired_at: Option<OffsetDateTime>,
+    pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BillList {
@@ -441,14 +544,14 @@ pub struct Payout {
     pub external_id: String,
     pub amount: Decimal,
     pub fee: Decimal,
-    pub status: String,
-    pub created_at: String,
+    pub status: PayoutStatus,
+    pub created_at: OffsetDateTime,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Balance {
     pub merchant_id: i64,
     pub balances: std::collections::BTreeMap<String, Decimal>,
-    pub currency: String,
+    pub currency: Currency,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QrisStatic {
@@ -462,9 +565,9 @@ pub struct QrisStatic {
     pub store_id: String,
     pub terminal_id: String,
     pub fee_percent: Decimal,
-    pub status: String,
-    pub created_at: String,
-    pub updated_at: String,
+    pub status: QrisStatus,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QrisStaticDetail {
