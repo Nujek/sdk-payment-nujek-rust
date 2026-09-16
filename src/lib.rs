@@ -3,6 +3,7 @@
 use hmac::{Hmac, Mac};
 use reqwest::{Client as HttpClient, Method, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use rust_decimal::Decimal;
 use sha2::Sha256;
 use std::{
     fmt,
@@ -254,7 +255,7 @@ pub struct Envelope<T> {
 pub struct CreateBillRequest {
     pub external_id: String,
     pub channel_id: String,
-    pub total: serde_json::Value,
+    pub total: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -289,9 +290,9 @@ pub struct MerchantUser {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserWallet {
-    pub available: serde_json::Value,
-    pub pending: serde_json::Value,
-    pub locked: serde_json::Value,
+    pub available: Decimal,
+    pub pending: Decimal,
+    pub locked: Decimal,
     pub currency: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -318,9 +319,9 @@ pub struct UserListItem {
     pub email: Option<String>,
     pub phone: Option<String>,
     pub status: String,
-    pub available: serde_json::Value,
-    pub pending: serde_json::Value,
-    pub locked: serde_json::Value,
+    pub available: Decimal,
+    pub pending: Decimal,
+    pub locked: Decimal,
     pub created_at: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -330,7 +331,7 @@ pub struct UserList {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletMutationRequest {
-    pub amount: serde_json::Value,
+    pub amount: Decimal,
     pub reference_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -339,9 +340,9 @@ pub struct WalletMutationRequest {
 pub struct WalletMutationResponse {
     pub transaction_id: String,
     pub external_user_id: String,
-    pub amount: serde_json::Value,
-    pub balance_before: serde_json::Value,
-    pub balance_after: serde_json::Value,
+    pub amount: Decimal,
+    pub balance_before: Decimal,
+    pub balance_after: Decimal,
     pub status: String,
     pub reference_id: String,
 }
@@ -350,9 +351,9 @@ pub struct WalletTransactionLookup {
     pub transaction_id: String,
     pub reference_id: String,
     pub operation: WalletTransactionType,
-    pub amount: serde_json::Value,
-    pub balance_before: serde_json::Value,
-    pub balance_after: serde_json::Value,
+    pub amount: Decimal,
+    pub balance_before: Decimal,
+    pub balance_after: Decimal,
     pub status: String,
     pub created_at: Option<String>,
 }
@@ -397,7 +398,7 @@ pub struct CreatePayoutRequest {
     pub destination_bank: String,
     pub destination_account: String,
     pub destination_name: String,
-    pub amount: serde_json::Value,
+    pub amount: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
 }
@@ -406,9 +407,9 @@ pub struct Bill {
     pub uuid: String,
     pub external_id: String,
     pub channel_id: Option<String>,
-    pub total: Option<serde_json::Value>,
-    pub total_fee: Option<serde_json::Value>,
-    pub net_amount: Option<serde_json::Value>,
+    pub total: Option<Decimal>,
+    pub total_fee: Option<Decimal>,
+    pub net_amount: Option<Decimal>,
     pub currency: Option<String>,
     pub status: String,
     pub bank_reference_no: Option<String>,
@@ -435,15 +436,15 @@ pub struct Payout {
     pub id: i64,
     pub uuid: String,
     pub external_id: String,
-    pub amount: serde_json::Value,
-    pub fee: serde_json::Value,
+    pub amount: Decimal,
+    pub fee: Decimal,
     pub status: String,
     pub created_at: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Balance {
     pub merchant_id: i64,
-    pub balances: serde_json::Map<String, serde_json::Value>,
+    pub balances: std::collections::BTreeMap<String, Decimal>,
     pub currency: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -457,7 +458,7 @@ pub struct QrisStatic {
     pub reference_no: Option<String>,
     pub store_id: String,
     pub terminal_id: String,
-    pub fee_percent: serde_json::Value,
+    pub fee_percent: Decimal,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
@@ -465,7 +466,7 @@ pub struct QrisStatic {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QrisStaticDetail {
     pub qris_static: QrisStatic,
-    pub total_received: serde_json::Value,
+    pub total_received: Decimal,
     pub payments: Vec<serde_json::Value>,
 }
 

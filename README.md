@@ -7,7 +7,7 @@ let client = nujek_payment::Client::new(
 let result = client.create_bill(nujek_payment::CreateBillRequest {
     external_id: "order-123".into(),
     channel_id: "NOBU_QRIS".into(),
-    total: serde_json::json!("150000.00"),
+    total: "150000.00".parse::<rust_decimal::Decimal>()?,
     currency: Some("IDR".into()),
     expired_at: None,
     external_user_id: Some("USER-001".into()),
@@ -42,6 +42,6 @@ melalui callback mengkredit saldo merchant melalui alur payin yang sudah ada; bi
 otomatis melakukan top-up ke saldo user. Top-up user hanya terjadi melalui
 `topup_user_wallet`.
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.3.3`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.4.0`.
 
 Untuk callback partner, gunakan `verify_webhook_signature(timestamp, raw_body, signature, webhook_secret, now, 300)` sebelum parsing JSON.
