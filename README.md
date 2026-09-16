@@ -28,6 +28,6 @@ client.create_user(CreateUserRequest {
 client.user_history("USER-001", PageQuery { page: Some(1), per_page: Some(20) }).await?;
 ```
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.3.0`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.3.2`.
 
 Untuk callback partner, gunakan `verify_webhook_signature(timestamp, raw_body, signature, webhook_secret, now, 300)` sebelum parsing JSON.
