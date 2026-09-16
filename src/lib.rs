@@ -183,6 +183,33 @@ impl Client {
         )
         .await
     }
+    pub async fn create_user(&self, request: CreateUserRequest) -> Result<Envelope<UserCreated>, Error> {
+        self.request(Method::POST, "/v1/users", Some(serde_json::to_value(request).map_err(Error::Decode)?)).await
+    }
+    pub async fn list_users(&self, query: PageQuery) -> Result<UserList, Error> {
+        self.request(Method::GET, &format!("/v1/users?{query}"), None).await
+    }
+    pub async fn get_user(&self, external_user_id: &str) -> Result<Envelope<UserDetail>, Error> {
+        self.request(Method::GET, &format!("/v1/users/{}", encode_path(external_user_id)), None).await
+    }
+    pub async fn get_user_wallet(&self, external_user_id: &str) -> Result<Envelope<UserWalletResponse>, Error> {
+        self.request(Method::GET, &format!("/v1/users/{}/wallet", encode_path(external_user_id)), None).await
+    }
+    pub async fn topup_user_wallet(&self, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
+        self.mutate_user_wallet("topup", external_user_id, request).await
+    }
+    pub async fn debit_user_wallet(&self, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
+        self.mutate_user_wallet("debit", external_user_id, request).await
+    }
+    async fn mutate_user_wallet(&self, operation: &str, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
+        self.request(Method::POST, &format!("/v1/users/{}/{operation}", encode_path(external_user_id)), Some(serde_json::to_value(request).map_err(Error::Decode)?)).await
+    }
+    pub async fn user_history(&self, external_user_id: &str, query: PageQuery) -> Result<WalletTransactionList, Error> {
+        self.request(Method::GET, &format!("/v1/users/{}/history?{query}", encode_path(external_user_id)), None).await
+    }
+    pub async fn user_wallet_transactions(&self, external_user_id: &str, query: PageQuery) -> Result<WalletTransactionList, Error> {
+        self.request(Method::GET, &format!("/v1/users/{}/wallet/transactions?{query}", encode_path(external_user_id)), None).await
+    }
     pub async fn get_bill(&self, id: &str) -> Result<Envelope<Bill>, Error> {
         self.request(Method::GET, &format!("/v1/bills/{id}"), None)
             .await
@@ -211,6 +238,10 @@ impl Client {
     }
 }
 
+fn encode_path(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Envelope<T> {
     pub data: T,
@@ -224,6 +255,118 @@ pub struct CreateBillRequest {
     pub currency: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expired_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateUserRequest {
+    pub external_user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MerchantUser {
+    pub id: i64,
+    pub uuid: String,
+    pub merchant_id: i64,
+    pub external_user_id: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub status: String,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserWallet {
+    pub available: serde_json::Value,
+    pub locked: serde_json::Value,
+    pub currency: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserCreated {
+    pub user: MerchantUser,
+    pub wallet: UserWallet,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserDetail {
+    pub user: MerchantUser,
+    pub wallet: UserWallet,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserWalletResponse {
+    pub external_user_id: String,
+    pub wallet: UserWallet,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserListItem {
+    pub id: i64,
+    pub uuid: String,
+    pub external_user_id: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub status: String,
+    pub available: serde_json::Value,
+    pub locked: serde_json::Value,
+    pub created_at: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserList {
+    pub data: Vec<UserListItem>,
+    pub meta: Pagination,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WalletMutationRequest {
+    pub amount: serde_json::Value,
+    pub reference_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WalletMutationResponse {
+    pub transaction_id: String,
+    pub external_user_id: String,
+    pub amount: serde_json::Value,
+    pub balance_before: serde_json::Value,
+    pub balance_after: serde_json::Value,
+    pub status: String,
+    pub reference_id: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WalletTransaction {
+    pub id: i64,
+    pub uuid: String,
+    pub idempotency_key: String,
+    pub reference_id: i64,
+    #[serde(rename = "type")]
+    pub transaction_type: String,
+    pub description: Option<String>,
+    pub created_at: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WalletTransactionList {
+    pub data: Vec<WalletTransaction>,
+    pub meta: Pagination,
+}
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct PageQuery {
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+impl fmt::Display for PageQuery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        if let Some(value) = self.page { query.append_pair("page", &value.to_string()); }
+        if let Some(value) = self.per_page { query.append_pair("per_page", &value.to_string()); }
+        f.write_str(&query.finish())
+    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreatePayoutRequest {
@@ -310,6 +453,8 @@ pub struct ListBillsQuery {
     pub status: Option<String>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+    pub channel_id: Option<String>,
+    pub search: Option<String>,
 }
 impl fmt::Display for ListBillsQuery {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -329,6 +474,8 @@ impl fmt::Display for ListBillsQuery {
         if let Some(v) = self.per_page {
             query.append_pair("per_page", &v.to_string());
         }
+        if let Some(v) = &self.channel_id { query.append_pair("channel_id", v); }
+        if let Some(v) = &self.search { query.append_pair("search", v); }
         f.write_str(&query.finish())
     }
 }
