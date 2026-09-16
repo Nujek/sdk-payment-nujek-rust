@@ -28,6 +28,20 @@ client.create_user(CreateUserRequest {
 client.user_history("USER-001", PageQuery { page: Some(1), per_page: Some(20) }).await?;
 ```
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.3.2`.
+`reference_id` pada `topup_user_wallet` dan `debit_user_wallet` adalah kunci idempotensi
+yang scoped ke merchant dan user. Retry dengan reference yang sama tidak membuat transaksi
+kedua. Retry dengan nominal atau operasi berbeda menghasilkan konflik. Jika hasil request
+tidak pasti karena timeout, gunakan:
+
+```rust
+let status = client.lookup_wallet_transaction("USER-001", "TOPUP-001").await?;
+```
+
+`external_user_id` pada `create_bill` hanya mengaitkan bill dengan user. Pembayaran bank
+melalui callback mengkredit saldo merchant melalui alur payin yang sudah ada; bill tidak
+otomatis melakukan top-up ke saldo user. Top-up user hanya terjadi melalui
+`topup_user_wallet`.
+
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.3.3`.
 
 Untuk callback partner, gunakan `verify_webhook_signature(timestamp, raw_body, signature, webhook_secret, now, 300)` sebelum parsing JSON.

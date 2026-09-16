@@ -210,6 +210,10 @@ impl Client {
     pub async fn user_wallet_transactions(&self, external_user_id: &str, query: PageQuery) -> Result<WalletTransactionList, Error> {
         self.request(Method::GET, &format!("/v1/users/{}/wallet/transactions?{query}", encode_path(external_user_id)), None).await
     }
+    pub async fn lookup_wallet_transaction(&self, external_user_id: &str, reference_id: &str) -> Result<Envelope<WalletTransactionLookup>, Error> {
+        let query = url::form_urlencoded::Serializer::new(String::new()).append_pair("reference_id", reference_id).finish();
+        self.request(Method::GET, &format!("/v1/users/{}/wallet/transactions/by-reference?{query}", encode_path(external_user_id)), None).await
+    }
     pub async fn get_bill(&self, id: &str) -> Result<Envelope<Bill>, Error> {
         self.request(Method::GET, &format!("/v1/bills/{id}"), None)
             .await
@@ -340,6 +344,23 @@ pub struct WalletMutationResponse {
     pub balance_after: serde_json::Value,
     pub status: String,
     pub reference_id: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WalletTransactionLookup {
+    pub transaction_id: String,
+    pub reference_id: String,
+    pub operation: WalletTransactionType,
+    pub amount: serde_json::Value,
+    pub balance_before: serde_json::Value,
+    pub balance_after: serde_json::Value,
+    pub status: String,
+    pub created_at: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WalletTransactionType {
+    Topup,
+    Debit,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletTransaction {
