@@ -219,6 +219,9 @@ impl Client {
         self.request(Method::GET, &format!("/v1/bills/{id}"), None)
             .await
     }
+    pub async fn get_bill_by_external_id(&self, external_id: &str) -> Result<Envelope<Bill>, Error> {
+        self.request(Method::GET, &format!("/v1/bills/by-external-id/{}", encode_path(external_id)), None).await
+    }
     pub async fn list_bills(&self, query: ListBillsQuery) -> Result<BillList, Error> {
         self.request(Method::GET, &format!("/v1/bills?{query}"), None)
             .await
@@ -368,7 +371,7 @@ pub struct WalletTransaction {
     pub id: i64,
     pub uuid: String,
     pub idempotency_key: String,
-    pub reference_id: i64,
+    pub reference_id: String,
     #[serde(rename = "type")]
     pub transaction_type: String,
     pub description: Option<String>,

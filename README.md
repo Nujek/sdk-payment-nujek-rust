@@ -37,11 +37,17 @@ tidak pasti karena timeout, gunakan:
 let status = client.lookup_wallet_transaction("USER-001", "TOPUP-001").await?;
 ```
 
+Bill yang mungkin berhasil dibuat sebelum timeout dapat dicari dengan external ID:
+
+```rust
+let bill = client.get_bill_by_external_id("NUJEK_BILL:order-123").await?;
+```
+
 `external_user_id` pada `create_bill` hanya mengaitkan bill dengan user. Pembayaran bank
 melalui callback mengkredit saldo merchant melalui alur payin yang sudah ada; bill tidak
 otomatis melakukan top-up ke saldo user. Top-up user hanya terjadi melalui
 `topup_user_wallet`.
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.4.0`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.5.0`.
 
 Untuk callback partner, gunakan `verify_webhook_signature(timestamp, raw_body, signature, webhook_secret, now, 300)` sebelum parsing JSON.
