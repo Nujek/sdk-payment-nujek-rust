@@ -286,6 +286,7 @@ pub struct MerchantUser {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserWallet {
     pub available: serde_json::Value,
+    pub pending: serde_json::Value,
     pub locked: serde_json::Value,
     pub currency: String,
 }
@@ -314,6 +315,7 @@ pub struct UserListItem {
     pub phone: Option<String>,
     pub status: String,
     pub available: serde_json::Value,
+    pub pending: serde_json::Value,
     pub locked: serde_json::Value,
     pub created_at: Option<String>,
 }
