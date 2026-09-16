@@ -304,6 +304,18 @@ pub enum BillStatus {
     #[serde(other)]
     Unknown,
 }
+
+impl BillStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Paid => "paid",
+            Self::Settled => "settled",
+            Self::Expired => "expired",
+            Self::Unknown => "unknown",
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserStatus {
@@ -573,14 +585,28 @@ pub struct QrisStatic {
 pub struct QrisStaticDetail {
     pub qris_static: QrisStatic,
     pub total_received: Decimal,
-    pub payments: Vec<serde_json::Value>,
+    pub payments: Vec<QrisStaticPayment>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QrisStaticPayment {
+    pub id: i64,
+    pub uuid: String,
+    pub qris_static_id: i64,
+    pub amount: Decimal,
+    pub currency: Option<Currency>,
+    pub bank_reference_no: Option<String>,
+    pub payment_reference_no: Option<String>,
+    pub payer_name: Option<String>,
+    pub paid_at: Option<OffsetDateTime>,
+    pub bill_id: Option<i64>,
+    pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Default)]
 pub struct ListBillsQuery {
-    pub start_date: Option<String>,
-    pub end_date: Option<String>,
-    pub status: Option<String>,
+    pub start_date: Option<OffsetDateTime>,
+    pub end_date: Option<OffsetDateTime>,
+    pub status: Option<BillStatus>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
     pub channel_id: Option<String>,
@@ -590,13 +616,17 @@ impl fmt::Display for ListBillsQuery {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut query = url::form_urlencoded::Serializer::new(String::new());
         if let Some(v) = &self.start_date {
-            query.append_pair("start_date", v);
+            if let Ok(value) = v.format(&time::format_description::well_known::Rfc3339) {
+                query.append_pair("start_date", &value);
+            }
         }
         if let Some(v) = &self.end_date {
-            query.append_pair("end_date", v);
+            if let Ok(value) = v.format(&time::format_description::well_known::Rfc3339) {
+                query.append_pair("end_date", &value);
+            }
         }
         if let Some(v) = &self.status {
-            query.append_pair("status", v);
+            query.append_pair("status", v.as_str());
         }
         if let Some(v) = self.page {
             query.append_pair("page", &v.to_string());
@@ -629,11 +659,11 @@ mod tests {
     #[test]
     fn query_is_encoded() {
         let q = ListBillsQuery {
-            status: Some("pending paid".into()),
+            status: Some(BillStatus::Paid),
             page: Some(2),
             ..Default::default()
         };
-        assert_eq!(q.to_string(), "status=pending+paid&page=2");
+        assert_eq!(q.to_string(), "status=paid&page=2");
     }
     #[test]
     fn webhook_signature_is_verified() {
