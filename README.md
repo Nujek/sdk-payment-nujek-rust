@@ -1,10 +1,10 @@
 # Nujek merchant API SDK (Rust)
 
 ```rust
-let client = nujek_merchant_api::Client::new(
+let client = nujek_payment::Client::new(
     "https://payment.example.com", "api-key", "api-secret",
 )?;
-let result = client.create_bill(nujek_merchant_api::CreateBillRequest {
+let result = client.create_bill(nujek_payment::CreateBillRequest {
     external_id: "order-123".into(),
     channel_id: "NOBU_QRIS".into(),
     total: serde_json::json!("150000.00"),
@@ -28,6 +28,6 @@ client.create_user(CreateUserRequest {
 client.user_history("USER-001", PageQuery { page: Some(1), per_page: Some(20) }).await?;
 ```
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Versi SDK saat ini: `0.2.0`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.3.0`.
 
 Untuk callback partner, gunakan `verify_webhook_signature(timestamp, raw_body, signature, webhook_secret, now, 300)` sebelum parsing JSON.
