@@ -198,12 +198,7 @@ impl Client {
         let bytes = response.bytes().await.map_err(Error::Request)?;
         if !status.is_success() {
             let body_text = String::from_utf8_lossy(&bytes).into_owned();
-            let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
-            let message = parsed.get("message").and_then(|v| v.as_str())
-                .or_else(|| parsed.get("error").and_then(|v| v.as_str()))
-                .unwrap_or("API request failed").to_string();
-            let error_code = parsed.get("error_code").and_then(|v| v.as_str()).map(str::to_owned)
-                .or_else(|| parsed.get("code").and_then(|v| v.as_str()).map(str::to_owned));
+            let (error_code, message) = parse_api_error(&bytes);
             return Err(Error::Response {
                 status,
                 error_code,
@@ -284,6 +279,26 @@ impl Client {
         self.request(Method::GET, &format!("/v1/qris-static/{id}"), None)
             .await
     }
+}
+
+fn parse_api_error(bytes: &[u8]) -> (Option<String>, String) {
+    let parsed: serde_json::Value = serde_json::from_slice(bytes).unwrap_or_default();
+    let envelope = parsed.get("error").filter(|value| value.is_object());
+    let error_code = envelope
+        .and_then(|value| value.get("code"))
+        .and_then(|value| value.as_str())
+        .or_else(|| parsed.get("error_code").and_then(|value| value.as_str()))
+        .or_else(|| parsed.get("code").and_then(|value| value.as_str()))
+        .map(str::to_owned);
+    let message = envelope
+        .and_then(|value| value.get("message"))
+        .and_then(|value| value.as_str())
+        .or_else(|| parsed.get("message").and_then(|value| value.as_str()))
+        .or_else(|| parsed.get("error").and_then(|value| value.as_str()))
+        .unwrap_or("API request failed")
+        .to_string();
+
+    (error_code, message)
 }
 
 fn encode_path(value: &str) -> String {
@@ -369,11 +384,8 @@ pub struct CreateBillRequest {
     pub total: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<Currency>,
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        with = "time::serde::rfc3339::option"
-    )]
-    pub expired_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub expired_at: OffsetDateTime,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -688,6 +700,16 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(q.to_string(), "status=paid&page=2");
+    }
+
+    #[test]
+    fn structured_api_errors_expose_code_and_message() {
+        let (code, message) = parse_api_error(
+            br#"{"error":{"code":"validation_error","message":"expired_at is required"}}"#,
+        );
+
+        assert_eq!(code.as_deref(), Some("validation_error"));
+        assert_eq!(message, "expired_at is required");
     }
 
     #[test]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- **Breaking:** `CreateBillRequest.expired_at` is required and encoded as RFC3339.
+- Decode the `/v1` structured error envelope into `Error::Response` code and message.
+
 ## 0.7.1
 
 - Fixed RFC3339 decoding for API response timestamps.

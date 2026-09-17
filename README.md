@@ -9,7 +9,8 @@ let result = client.create_bill(nujek_payment::CreateBillRequest {
     channel_id: "NOBU_QRIS".into(),
     total: "150000.00".parse::<rust_decimal::Decimal>()?,
     currency: Some(Currency::Idr),
-    expired_at: None,
+    // Wajib; gunakan waktu RFC3339 di masa depan.
+    expired_at: time::OffsetDateTime::now_utc() + time::Duration::minutes(15),
     external_user_id: Some("USER-001".into()),
     description: Some("Pembayaran perjalanan".into()),
 }).await?;
@@ -64,7 +65,7 @@ melalui callback mengkredit saldo merchant melalui alur payin yang sudah ada; bi
 otomatis melakukan top-up ke saldo user. Top-up user hanya terjadi melalui
 `topup_user_wallet`.
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.7.0`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.0`.
 
 `ListBillsQuery.status` memakai `BillStatus`, sedangkan `start_date` dan `end_date` memakai `time::OffsetDateTime` dan dikirim sebagai RFC3339. Detail QRIS memakai `QrisStaticPayment` typed, bukan JSON bebas.
 
