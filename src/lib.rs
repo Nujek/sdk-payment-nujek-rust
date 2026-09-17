@@ -369,7 +369,10 @@ pub struct CreateBillRequest {
     pub total: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<Currency>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
     pub expired_at: Option<OffsetDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_user_id: Option<String>,
@@ -396,7 +399,9 @@ pub struct MerchantUser {
     pub email: Option<String>,
     pub phone: Option<String>,
     pub status: UserStatus,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub updated_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -433,6 +438,7 @@ pub struct UserListItem {
     pub available: Decimal,
     pub pending: Decimal,
     pub locked: Decimal,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -466,6 +472,7 @@ pub struct WalletTransactionLookup {
     pub balance_before: Decimal,
     pub balance_after: Decimal,
     pub status: WalletMutationStatus,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -490,6 +497,7 @@ pub struct WalletTransaction {
     #[serde(rename = "type")]
     pub transaction_type: WalletTransactionType,
     pub description: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -524,17 +532,28 @@ pub struct CreatePayoutRequest {
 pub struct Bill {
     pub uuid: String,
     pub external_id: String,
+    #[serde(default)]
     pub channel_id: Option<String>,
+    #[serde(default)]
     pub total: Option<Decimal>,
+    #[serde(default)]
     pub total_fee: Option<Decimal>,
+    #[serde(default)]
     pub net_amount: Option<Decimal>,
+    #[serde(default)]
     pub currency: Option<Currency>,
     pub status: BillStatus,
+    #[serde(default)]
     pub bank_reference_no: Option<String>,
+    #[serde(default)]
     pub payment_value: Option<String>,
+    #[serde(default)]
     pub bank_status: Option<String>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
     pub paid_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
     pub expired_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -557,6 +576,7 @@ pub struct Payout {
     pub amount: Decimal,
     pub fee: Decimal,
     pub status: PayoutStatus,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -578,7 +598,9 @@ pub struct QrisStatic {
     pub terminal_id: String,
     pub fee_percent: Decimal,
     pub status: QrisStatus,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -597,8 +619,10 @@ pub struct QrisStaticPayment {
     pub bank_reference_no: Option<String>,
     pub payment_reference_no: Option<String>,
     pub payer_name: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub paid_at: Option<OffsetDateTime>,
     pub bill_id: Option<i64>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
 }
 
@@ -664,6 +688,29 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(q.to_string(), "status=paid&page=2");
+    }
+
+    #[test]
+    fn bill_response_decodes_rfc3339_timestamps() {
+        let response: Envelope<Bill> = serde_json::from_str(
+            r#"{
+                "data": {
+                    "uuid": "780ff185-8e22-46af-8fca-74b60a7d91ec",
+                    "external_id": "TOPUP-dfaa1a04",
+                    "total": "1",
+                    "total_fee": "0.01",
+                    "net_amount": "0.99",
+                    "status": "pending",
+                    "bank_reference_no": null,
+                    "payment_value": null,
+                    "created_at": "2026-09-17T13:05:19.539721Z"
+                }
+            }"#,
+        )
+        .expect("payment API RFC3339 response must decode");
+
+        assert_eq!(response.data.status, BillStatus::Pending);
+        assert!(response.data.created_at.is_some());
     }
     #[test]
     fn webhook_signature_is_verified() {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Fixed RFC3339 decoding for API response timestamps.
+- Allow omitted optional bill fields in create-bill responses.
+
 ## 0.7.0
 
 - Typed `ListBillsQuery.status` with `BillStatus`.
