@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2
+
+- Added a credential-driven live staging example covering SDK endpoints.
+- Added `.env.example` for safe live-test configuration.
+- Decode user-list responses from deployed API versions that omit a zero `pending` balance.
+- Corrected webhook verification to match the RFC3339 timestamp and headers sent by the API.
+
 ## 0.8.1
 
 - Fixed user wallet top-up and debit routes to use `/wallet/{operation}`.

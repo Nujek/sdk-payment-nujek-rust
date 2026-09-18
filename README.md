@@ -99,8 +99,85 @@ Ok(())
 `list_bills_for_user` dan `get_bill_for_user` mengirim header `X-External-User-Id`.
 Alternatif path-based adalah `list_user_bills` dan `get_user_bill`.
 
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.1`.
+## Live test staging
+
+Example `live` memanggil endpoint SDK ke staging. Test read-only:
+
+```bash
+cp .env.example .env
+# isi NUJEK_API_KEY dan NUJEK_API_SECRET pada .env
+cargo run --example live
+```
+
+Untuk menguji endpoint yang membuat user dan bill QRIS, set `NUJEK_LIVE_TEST_WRITES=true`.
+Ini membuat data nyata di staging. Mutasi wallet hanya dijalankan bila
+`NUJEK_LIVE_TEST_WALLET=true`; gunakan hanya pada merchant test karena mengubah saldo.
+`NUJEK_LIVE_TEST_QRIS_STATIC_ID` mengaktifkan test detail QRIS static.
+
+File `.env` tidak dilacak Git dan kredensial asli tidak boleh dimasukkan ke `.env.example`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.2`.
 
 `ListBillsQuery.status` memakai `BillStatus`, sedangkan `start_date` dan `end_date` memakai `time::OffsetDateTime` dan dikirim sebagai RFC3339. Detail QRIS memakai `QrisStaticPayment` typed, bukan JSON bebas.
 
-Untuk callback partner, gunakan `verify_webhook_signature(timestamp, raw_body, signature, webhook_secret, now, 300)` sebelum parsing JSON.
+## Validasi webhook
+
+Setelah bill dibayar, callback `POST` dikirim ke URL webhook yang dikonfigurasi.
+Ambil `webhook_secret` dari konfigurasi API key di Portal dan simpan sebagai environment
+variable (`NUJEK_WEBHOOK_SECRET`); jangan pernah memasukkannya ke source code atau log.
+
+Header yang dikirim:
+
+- `X-Webhook-Timestamp`: waktu RFC3339, misalnya `2026-09-18T03:15:30.123Z`.
+- `X-Webhook-Signature`: `sha256=<hex HMAC-SHA256>`.
+- `X-Nujek-Webhook-Id`: ID delivery; simpan sebagai kunci idempotensi agar event retry
+  tidak diproses dua kali.
+- `X-API-Key`: API key yang terkait dengan bill, bila callback berasal dari API key tersebut.
+
+Signature dihitung atas byte persis `"{X-Webhook-Timestamp}.{raw_body}"`. Jangan parse,
+pretty-print, atau mengubah body sebelum validasi. Berikut contoh handler Axum:
+
+```rust
+use axum::{body::Bytes, http::{HeaderMap, StatusCode}};
+use nujek_payment::verify_webhook_signature;
+use std::env;
+use time::OffsetDateTime;
+
+async fn payment_webhook(headers: HeaderMap, body: Bytes) -> StatusCode {
+    let timestamp = match headers.get("x-webhook-timestamp").and_then(|v| v.to_str().ok()) {
+        Some(value) => value,
+        None => return StatusCode::BAD_REQUEST,
+    };
+    let signature = match headers.get("x-webhook-signature").and_then(|v| v.to_str().ok()) {
+        Some(value) => value,
+        None => return StatusCode::UNAUTHORIZED,
+    };
+    let secret = match env::var("NUJEK_WEBHOOK_SECRET") {
+        Ok(value) => value,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    if !verify_webhook_signature(
+        timestamp,
+        &body,
+        signature,
+        &secret,
+        OffsetDateTime::now_utc().unix_timestamp(),
+        300,
+    ) {
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    // Setelah signature valid, parse body dan proses event secara idempoten.
+    let event: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => return StatusCode::BAD_REQUEST,
+    };
+    let delivery_id = headers.get("x-nujek-webhook-id").and_then(|v| v.to_str().ok());
+    println!("received event={event}, delivery_id={delivery_id:?}");
+    StatusCode::OK
+}
+```
+
+Balas `2xx` hanya setelah event tercatat atau berhasil diproses. Respons `4xx` dianggap gagal
+permanen; respons `5xx` atau timeout akan dicoba ulang. Tetap gunakan idempotensi berdasarkan
+`X-Nujek-Webhook-Id` dan/atau `bill_id` karena delivery dapat terkirim lebih dari sekali.

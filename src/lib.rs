@@ -36,16 +36,25 @@ pub fn sign(
     hex::encode(mac.finalize().into_bytes())
 }
 
-/// Verifies `X-Nujek-Signature` over `timestamp.raw_body` and rejects stale requests.
+/// Verifies `X-Webhook-Signature` over `X-Webhook-Timestamp.raw_body`.
+///
+/// `timestamp` must be the RFC3339 header value exactly as received. The verifier
+/// rejects callbacks outside `max_age_seconds` (or 300 seconds when it is zero).
 pub fn verify_webhook_signature(
-    timestamp: i64,
+    timestamp: &str,
     raw_body: &[u8],
     signature: &str,
     webhook_secret: &str,
     now: i64,
     max_age_seconds: i64,
 ) -> bool {
-    if (now - timestamp).abs()
+    let Ok(parsed_timestamp) = OffsetDateTime::parse(
+        timestamp,
+        &time::format_description::well_known::Rfc3339,
+    ) else {
+        return false;
+    };
+    if (now - parsed_timestamp.unix_timestamp()).abs()
         > if max_age_seconds > 0 {
             max_age_seconds
         } else {
@@ -54,6 +63,7 @@ pub fn verify_webhook_signature(
     {
         return false;
     }
+    // Sign the original header verbatim; reformatting RFC3339 would change its HMAC.
     let expected = sign_webhook(timestamp, raw_body, webhook_secret);
     let provided = signature.strip_prefix("sha256=").unwrap_or(signature);
     let Ok(provided) = hex::decode(provided) else {
@@ -66,10 +76,10 @@ pub fn verify_webhook_signature(
             .fold(0u8, |acc, (a, b)| acc | (a ^ b))
             == 0
 }
-fn sign_webhook(timestamp: i64, raw_body: &[u8], secret: &str) -> Vec<u8> {
+fn sign_webhook(timestamp: &str, raw_body: &[u8], secret: &str) -> Vec<u8> {
     let mut mac =
         HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts keys of any length");
-    mac.update(format!("{}.", timestamp).as_bytes());
+    mac.update(format!("{timestamp}.").as_bytes());
     mac.update(raw_body);
     mac.finalize().into_bytes().to_vec()
 }
@@ -474,6 +484,8 @@ pub struct UserListItem {
     pub phone: Option<String>,
     pub status: UserStatus,
     pub available: Decimal,
+    /// Older deployed API versions omit this zero-valued balance from list responses.
+    #[serde(default)]
     pub pending: Decimal,
     pub locked: Decimal,
     #[serde(with = "time::serde::rfc3339::option")]
@@ -768,15 +780,40 @@ mod tests {
         assert_eq!(response.data.status, BillStatus::Pending);
         assert!(response.data.created_at.is_some());
     }
+
+    #[test]
+    fn user_list_decodes_when_pending_balance_is_omitted() {
+        let response: UserList = serde_json::from_str(
+            r#"{
+                "data": [{
+                    "id": 1,
+                    "uuid": "780ff185-8e22-46af-8fca-74b60a7d91ec",
+                    "external_user_id": "USER-001",
+                    "name": null,
+                    "email": null,
+                    "phone": null,
+                    "status": "active",
+                    "available": "0",
+                    "locked": "0",
+                    "created_at": "2026-09-18T00:00:00Z"
+                }],
+                "meta": {"page": 1, "per_page": 20, "total": 1, "total_pages": 1}
+            }"#,
+        )
+        .expect("list users must support an omitted zero pending balance");
+
+        assert_eq!(response.data[0].pending, Decimal::ZERO);
+    }
     #[test]
     fn webhook_signature_is_verified() {
+        let timestamp = "2023-11-14T22:13:20Z";
         let body = br#"{"event":"bill.paid"}"#;
         let mut mac = HmacSha256::new_from_slice(b"whsec_test").unwrap();
-        mac.update(b"1700000000.");
+        mac.update(format!("{timestamp}.").as_bytes());
         mac.update(body);
         let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
         assert!(verify_webhook_signature(
-            1700000000,
+            timestamp,
             body,
             &signature,
             "whsec_test",
