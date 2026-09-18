@@ -4,7 +4,7 @@ use hmac::{Hmac, Mac};
 use reqwest::{Client as HttpClient, Method, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use rust_decimal::Decimal;
-use time::OffsetDateTime;
+pub use time::{Duration, OffsetDateTime};
 use sha2::Sha256;
 use std::{
     fmt,
@@ -158,6 +158,17 @@ impl Client {
         endpoint: &str,
         body: Option<serde_json::Value>,
     ) -> Result<T, Error> {
+        self.request_with_external_user_id(method, endpoint, body, None)
+            .await
+    }
+
+    async fn request_with_external_user_id<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        body: Option<serde_json::Value>,
+        external_user_id: Option<&str>,
+    ) -> Result<T, Error> {
         if !endpoint.starts_with('/') {
             return Err(Error::InvalidEndpoint);
         }
@@ -190,6 +201,9 @@ impl Client {
             .header("X-Signature", signature);
         if has_body {
             request = request.header("Content-Type", "application/json");
+        }
+        if let Some(external_user_id) = external_user_id {
+            request = request.header("X-External-User-Id", external_user_id);
         }
         let response = request.body(payload).send().await.map_err(Error::Request)?;
         let status = response.status();
@@ -238,7 +252,7 @@ impl Client {
         self.mutate_user_wallet("debit", external_user_id, request).await
     }
     async fn mutate_user_wallet(&self, operation: &str, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
-        self.request(Method::POST, &format!("/v1/users/{}/{operation}", encode_path(external_user_id)), Some(serde_json::to_value(request).map_err(Error::Decode)?)).await
+        self.request(Method::POST, &format!("/v1/users/{}/wallet/{operation}", encode_path(external_user_id)), Some(serde_json::to_value(request).map_err(Error::Decode)?)).await
     }
     pub async fn user_history(&self, external_user_id: &str, query: PageQuery) -> Result<WalletTransactionList, Error> {
         self.request(Method::GET, &format!("/v1/users/{}/history?{query}", encode_path(external_user_id)), None).await
@@ -260,6 +274,18 @@ impl Client {
     pub async fn list_bills(&self, query: ListBillsQuery) -> Result<BillList, Error> {
         self.request(Method::GET, &format!("/v1/bills?{query}"), None)
             .await
+    }
+    pub async fn list_bills_for_user(&self, external_user_id: &str, query: ListBillsQuery) -> Result<BillList, Error> {
+        self.request_with_external_user_id(Method::GET, &format!("/v1/bills?{query}"), None, Some(external_user_id)).await
+    }
+    pub async fn get_bill_for_user(&self, id: &str, external_user_id: &str) -> Result<Envelope<Bill>, Error> {
+        self.request_with_external_user_id(Method::GET, &format!("/v1/bills/{id}"), None, Some(external_user_id)).await
+    }
+    pub async fn list_user_bills(&self, external_user_id: &str, query: PageQuery) -> Result<BillList, Error> {
+        self.request(Method::GET, &format!("/v1/users/{}/bills?{query}", encode_path(external_user_id)), None).await
+    }
+    pub async fn get_user_bill(&self, external_user_id: &str, id: &str) -> Result<Envelope<Bill>, Error> {
+        self.request(Method::GET, &format!("/v1/users/{}/bills/{id}", encode_path(external_user_id)), None).await
     }
     pub async fn create_payout(&self, request: CreatePayoutRequest) -> Result<Payout, Error> {
         self.request(
@@ -710,6 +736,14 @@ mod tests {
 
         assert_eq!(code.as_deref(), Some("validation_error"));
         assert_eq!(message, "expired_at is required");
+    }
+
+    #[test]
+    fn wallet_mutation_routes_match_the_api() {
+        assert_eq!(
+            format!("/v1/users/{}/wallet/topup", encode_path("USER-001")),
+            "/v1/users/USER-001/wallet/topup",
+        );
     }
 
     #[test]

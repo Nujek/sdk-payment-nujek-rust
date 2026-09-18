@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+- Fixed user wallet top-up and debit routes to use `/wallet/{operation}`.
+- Added bill history and detail methods scoped by external user ID.
+- Re-exported `Duration` and `OffsetDateTime` for request construction.
+
 ## 0.8.0
 
 - **Breaking:** `CreateBillRequest.expired_at` is required and encoded as RFC3339.
