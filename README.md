@@ -115,7 +115,7 @@ Ini membuat data nyata di staging. Mutasi wallet hanya dijalankan bila
 `NUJEK_LIVE_TEST_QRIS_STATIC_ID` mengaktifkan test detail QRIS static.
 
 File `.env` tidak dilacak Git dan kredensial asli tidak boleh dimasukkan ke `.env.example`.
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.2`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.3`.
 
 `ListBillsQuery.status` memakai `BillStatus`, sedangkan `start_date` dan `end_date` memakai `time::OffsetDateTime` dan dikirim sebagai RFC3339. Detail QRIS memakai `QrisStaticPayment` typed, bukan JSON bebas.
 

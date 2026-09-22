@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.3
+
+- Added create, list, and detail methods for manual merchant payouts.
+- Expanded payout models with destination, lifecycle, bank-reference, and failure fields.
+
 ## 0.8.2
 
 - Added a credential-driven live staging example covering SDK endpoints.

@@ -116,11 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         destination_name: "SDK live test".into(),
         amount: "1000".parse()?,
         currency: Some(Currency::Idr),
+        description: Some("SDK live test payout".into()),
     }).await;
-    match payout {
-        Err(error) if error.error_code() == Some("not_implemented") => println!("✓ POST /v1/payouts (currently returns expected not_implemented)"),
-        other => { report("POST /v1/payouts", other); }
-    }
+    report("POST /v1/payouts", payout);
 
     Ok(())
 }

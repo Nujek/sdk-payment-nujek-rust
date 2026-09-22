@@ -297,7 +297,7 @@ impl Client {
     pub async fn get_user_bill(&self, external_user_id: &str, id: &str) -> Result<Envelope<Bill>, Error> {
         self.request(Method::GET, &format!("/v1/users/{}/bills/{id}", encode_path(external_user_id)), None).await
     }
-    pub async fn create_payout(&self, request: CreatePayoutRequest) -> Result<Payout, Error> {
+    pub async fn create_payout(&self, request: CreatePayoutRequest) -> Result<Envelope<Payout>, Error> {
         self.request(
             Method::POST,
             "/v1/payouts",
@@ -305,6 +305,8 @@ impl Client {
         )
         .await
     }
+    pub async fn list_payouts(&self, query: PageQuery) -> Result<PayoutList, Error> { self.request(Method::GET, &format!("/v1/payouts?{query}"), None).await }
+    pub async fn get_payout(&self, id: &str) -> Result<Envelope<Payout>, Error> { self.request(Method::GET, &format!("/v1/payouts/{id}"), None).await }
     pub async fn balance(&self) -> Result<Envelope<Balance>, Error> {
         self.request(Method::GET, "/v1/balance", None).await
     }
@@ -577,6 +579,8 @@ pub struct CreatePayoutRequest {
     pub amount: Decimal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<Currency>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bill {
@@ -620,15 +624,25 @@ pub struct Pagination {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payout {
-    pub id: i64,
+    #[serde(default)] pub id: Option<i64>,
     pub uuid: String,
     pub external_id: String,
     pub amount: Decimal,
     pub fee: Decimal,
     pub status: PayoutStatus,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
+    #[serde(default)] pub method: Option<String>,
+    #[serde(default)] pub destination_bank: Option<String>,
+    #[serde(default)] pub destination_account: Option<String>,
+    #[serde(default)] pub destination_name: Option<String>,
+    #[serde(default)] pub description: Option<String>,
+    #[serde(default)] pub bank_reference: Option<String>,
+    #[serde(default)] pub failure_reason: Option<String>,
+    #[serde(default, with = "time::serde::rfc3339::option")] pub created_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")] pub approved_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")] pub paid_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")] pub completed_at: Option<OffsetDateTime>,
 }
+#[derive(Debug, Serialize, Deserialize)] pub struct PayoutList { pub data: Vec<Payout>, pub meta: Pagination }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Balance {
     pub merchant_id: i64,
