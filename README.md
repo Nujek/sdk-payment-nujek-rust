@@ -43,8 +43,8 @@ User dibuat hanya setelah menyelesaikan WebView onboarding. Gunakan `webview_url
 untuk membuka WebView, lalu gunakan `external_user_id` yang sama untuk API wallet dan bill.
 `POST /v1/users` tidak tersedia.
 
-Setelah redirect dari WebView, merchant wajib memeriksa `onboarding_token` yang diterima
-pada URL redirect menggunakan API terautentikasi berikut:
+Merchant menerima `onboarding_token` di respons saat membuat sesi dan di webhook completion,
+bukan pada URL redirect. Gunakan API terautentikasi berikut untuk memeriksa token tersebut:
 
 ```rust
 let session = client.get_onboarding_session("onboarding-token").await?;
@@ -137,15 +137,37 @@ Untuk memeriksa token yang sudah ada, isi `NUJEK_LIVE_TEST_ONBOARDING_TOKEN`; re
 dijalankan bila `NUJEK_LIVE_TEST_REVOKE_ONBOARDING_TOKEN=true`.
 
 File `.env` tidak dilacak Git dan kredensial asli tidak boleh dimasukkan ke `.env.example`.
-Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.3`.
+Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.9.1`.
 
 `ListBillsQuery.status` memakai `BillStatus`, sedangkan `start_date` dan `end_date` memakai `time::OffsetDateTime` dan dikirim sebagai RFC3339. Detail QRIS memakai `QrisStaticPayment` typed, bukan JSON bebas.
 
 ## Validasi webhook
 
-Setelah bill dibayar, callback `POST` dikirim ke URL webhook yang dikonfigurasi.
+Setiap delivery webhook memiliki field top-level `event`. Contohnya `bill.paid`,
+`user.onboarding.completed`, dan `webhook.test`. Callback `POST` dikirim ke URL webhook
+yang dikonfigurasi pada API key yang memicu event.
 Ambil `webhook_secret` dari konfigurasi API key di Portal dan simpan sebagai environment
 variable (`NUJEK_WEBHOOK_SECRET`); jangan pernah memasukkannya ke source code atau log.
+
+Setelah user menyelesaikan onboarding, redirect hanya membawa `external_user_id` dan
+`status=success`. `onboarding_token` tidak dikirim lewat URL; event signed berikut dikirim
+ke webhook API key yang membuat sesi:
+
+```json
+{
+  "event": "user.onboarding.completed",
+  "api_key_id": 15,
+  "occurred_at": "2026-09-23T12:00:00Z",
+  "data": {
+    "external_user_id": "USER-001",
+    "onboarding_token": "6f1a...",
+    "wallet_status": "active"
+  }
+}
+```
+
+Gunakan `event` untuk memilih handler. Nilai `onboarding_token` hanya diproses setelah
+signature webhook valid, dan dapat digunakan dengan `get_onboarding_session` atau revoke API.
 
 Header yang dikirim:
 

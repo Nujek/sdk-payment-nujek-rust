@@ -770,7 +770,7 @@ dependencies = [
 
 [[package]]
 name = "nujek-payment"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "dotenvy",
  "hex",
