@@ -22,23 +22,42 @@ Ok(())
 }
 ```
 
-User dan wallet merchant:
+Mulai onboarding user:
 
 ```rust
-use nujek_payment::{Client, CreateUserRequest, PageQuery};
+use nujek_payment::{Client, CreateOnboardingSessionRequest};
 
-async fn user_wallet(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
-client.create_user(CreateUserRequest {
+async fn start_onboarding(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
+client.create_onboarding_session(CreateOnboardingSessionRequest {
     external_user_id: "USER-001".into(),
     name: Some("Budi".into()),
-    email: None,
-    phone: None,
+    email: Some("budi@example.com".into()),
+    phone: Some("628123456789".into()),
+    redirect_url: "https://merchant.example.com/onboarding-complete".into(),
 }).await?;
-
-client.user_history("USER-001", PageQuery { page: Some(1), per_page: Some(20) }).await?;
 Ok(())
 }
 ```
+
+User dibuat hanya setelah menyelesaikan WebView onboarding. Gunakan `webview_url` dari respons
+untuk membuka WebView, lalu gunakan `external_user_id` yang sama untuk API wallet dan bill.
+`POST /v1/users` tidak tersedia.
+
+Setelah redirect dari WebView, merchant wajib memeriksa `onboarding_token` yang diterima
+pada URL redirect menggunakan API terautentikasi berikut:
+
+```rust
+let session = client.get_onboarding_session("onboarding-token").await?;
+assert_eq!(session.data.status, "active");
+assert_eq!(session.data.external_user_id, "USER-001");
+
+// Token tidak kedaluwarsa. Cabut saat merchant tidak lagi mengizinkan koneksi ini.
+let revoked = client.revoke_onboarding_session("onboarding-token").await?;
+assert_eq!(revoked.data.status, "revoked");
+```
+
+`revoke_onboarding_session` hanya dapat digunakan setelah onboarding selesai dan tidak dapat
+dibatalkan. Jangan memanggilnya sebagai bagian dari retry normal.
 
 `reference_id` pada `topup_user_wallet` dan `debit_user_wallet` adalah kunci idempotensi
 yang scoped ke merchant dan user. Retry dengan reference yang sama tidak membuat transaksi
@@ -109,10 +128,13 @@ cp .env.example .env
 cargo run --example live
 ```
 
-Untuk menguji endpoint yang membuat user dan bill QRIS, set `NUJEK_LIVE_TEST_WRITES=true`.
+Untuk menguji endpoint onboarding dan bill QRIS, set `NUJEK_LIVE_TEST_WRITES=true`.
 Ini membuat data nyata di staging. Mutasi wallet hanya dijalankan bila
 `NUJEK_LIVE_TEST_WALLET=true`; gunakan hanya pada merchant test karena mengubah saldo.
 `NUJEK_LIVE_TEST_QRIS_STATIC_ID` mengaktifkan test detail QRIS static.
+Setelah onboarding selesai, isi `NUJEK_LIVE_TEST_EXTERNAL_USER_ID` untuk test user/wallet.
+Untuk memeriksa token yang sudah ada, isi `NUJEK_LIVE_TEST_ONBOARDING_TOKEN`; revoke hanya
+dijalankan bila `NUJEK_LIVE_TEST_REVOKE_ONBOARDING_TOKEN=true`.
 
 File `.env` tidak dilacak Git dan kredensial asli tidak boleh dimasukkan ke `.env.example`.
 Signature memakai `HMAC-SHA256(METHOD:path:unix_timestamp:raw_body)` dan dikirim dalam header API secara otomatis. Nominal memakai `rust_decimal::Decimal`. Nama crate: `nujek-payment`. Versi SDK saat ini: `0.8.3`.

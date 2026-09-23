@@ -1,6 +1,6 @@
 use nujek_payment::{
-    Client, CreateBillRequest, CreateUserRequest, Currency, Duration, ListBillsQuery,
-    OffsetDateTime, PageQuery,
+    Client, CreateBillRequest, CreateOnboardingSessionRequest, Currency, Duration, ListBillsQuery,
+    OffsetDateTime,
 };
 
 async fn create_bill() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,23 +20,15 @@ async fn create_bill() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn user_wallet(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
+async fn start_onboarding(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
     client
-        .create_user(CreateUserRequest {
+        .create_onboarding_session(CreateOnboardingSessionRequest {
             external_user_id: "USER-001".into(),
             name: Some("Budi".into()),
-            email: None,
-            phone: None,
+            email: Some("budi@example.com".into()),
+            phone: Some("628123456789".into()),
+            redirect_url: "https://merchant.example.com/onboarding-complete".into(),
         })
-        .await?;
-    client
-        .user_history(
-            "USER-001",
-            PageQuery {
-                page: Some(1),
-                per_page: Some(20),
-            },
-        )
         .await?;
     Ok(())
 }
@@ -58,5 +50,5 @@ async fn user_bill_history(client: &Client) -> Result<(), Box<dyn std::error::Er
 }
 
 fn main() {
-    let _ = (create_bill, user_wallet, user_bill_history);
+    let _ = (create_bill, start_onboarding, user_bill_history);
 }

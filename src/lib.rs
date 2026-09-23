@@ -2,14 +2,14 @@
 
 use hmac::{Hmac, Mac};
 use reqwest::{Client as HttpClient, Method, StatusCode, Url};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use rust_decimal::Decimal;
-pub use time::{Duration, OffsetDateTime};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::Sha256;
 use std::{
     fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
+pub use time::{Duration, OffsetDateTime};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -48,10 +48,9 @@ pub fn verify_webhook_signature(
     now: i64,
     max_age_seconds: i64,
 ) -> bool {
-    let Ok(parsed_timestamp) = OffsetDateTime::parse(
-        timestamp,
-        &time::format_description::well_known::Rfc3339,
-    ) else {
+    let Ok(parsed_timestamp) =
+        OffsetDateTime::parse(timestamp, &time::format_description::well_known::Rfc3339)
+    else {
         return false;
     };
     if (now - parsed_timestamp.unix_timestamp()).abs()
@@ -104,11 +103,21 @@ impl fmt::Display for Error {
         match self {
             Self::InvalidBaseUrl(e) => write!(f, "nujek merchant API: invalid base URL: {e}"),
             Self::Request(e) => write!(f, "nujek merchant API: request failed: {e}"),
-            Self::Response { status, error_code, message, request_id, .. } => {
+            Self::Response {
+                status,
+                error_code,
+                message,
+                request_id,
+                ..
+            } => {
                 write!(f, "nujek payment API: HTTP {status}")?;
-                if let Some(code) = error_code { write!(f, " [{code}]")?; }
+                if let Some(code) = error_code {
+                    write!(f, " [{code}]")?;
+                }
                 write!(f, ": {message}")?;
-                if let Some(id) = request_id { write!(f, " (request_id={id})")?; }
+                if let Some(id) = request_id {
+                    write!(f, " (request_id={id})")?;
+                }
                 Ok(())
             }
             Self::Decode(e) => write!(f, "nujek merchant API: decode response: {e}"),
@@ -118,18 +127,56 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 impl Error {
-    pub fn status(&self) -> Option<StatusCode> { match self { Self::Response { status, .. } => Some(*status), _ => None } }
-    pub fn error_code(&self) -> Option<&str> { match self { Self::Response { error_code, .. } => error_code.as_deref(), _ => None } }
-    pub fn request_id(&self) -> Option<&str> { match self { Self::Response { request_id, .. } => request_id.as_deref(), _ => None } }
-    pub fn message(&self) -> Option<&str> { match self { Self::Response { message, .. } => Some(message), _ => None } }
+    pub fn status(&self) -> Option<StatusCode> {
+        match self {
+            Self::Response { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+    pub fn error_code(&self) -> Option<&str> {
+        match self {
+            Self::Response { error_code, .. } => error_code.as_deref(),
+            _ => None,
+        }
+    }
+    pub fn request_id(&self) -> Option<&str> {
+        match self {
+            Self::Response { request_id, .. } => request_id.as_deref(),
+            _ => None,
+        }
+    }
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            Self::Response { message, .. } => Some(message),
+            _ => None,
+        }
+    }
     /// Returns a bounded response body suitable for diagnostics; request payloads are never stored here.
-    pub fn body(&self) -> Option<&str> { match self { Self::Response { body, .. } => Some(body), _ => None } }
-    pub fn retry_after(&self) -> Option<u64> { match self { Self::Response { retry_after, .. } => *retry_after, _ => None } }
-    pub fn is_conflict(&self) -> bool { self.status() == Some(StatusCode::CONFLICT) }
-    pub fn is_not_found(&self) -> bool { self.status() == Some(StatusCode::NOT_FOUND) }
+    pub fn body(&self) -> Option<&str> {
+        match self {
+            Self::Response { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+    pub fn retry_after(&self) -> Option<u64> {
+        match self {
+            Self::Response { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+    pub fn is_conflict(&self) -> bool {
+        self.status() == Some(StatusCode::CONFLICT)
+    }
+    pub fn is_not_found(&self) -> bool {
+        self.status() == Some(StatusCode::NOT_FOUND)
+    }
     pub fn is_retryable(&self) -> bool {
-        matches!(self.status(), Some(StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_EARLY | StatusCode::TOO_MANY_REQUESTS))
-            || self.status().is_some_and(|status| status.is_server_error())
+        matches!(
+            self.status(),
+            Some(
+                StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_EARLY | StatusCode::TOO_MANY_REQUESTS
+            )
+        ) || self.status().is_some_and(|status| status.is_server_error())
     }
 }
 
@@ -217,8 +264,16 @@ impl Client {
         }
         let response = request.body(payload).send().await.map_err(Error::Request)?;
         let status = response.status();
-        let request_id_header = response.headers().get("x-request-id").and_then(|v| v.to_str().ok()).map(str::to_owned);
-        let retry_after_header = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
+        let request_id_header = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let retry_after_header = response
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
         let bytes = response.bytes().await.map_err(Error::Request)?;
         if !status.is_success() {
             let body_text = String::from_utf8_lossy(&bytes).into_owned();
@@ -243,61 +298,224 @@ impl Client {
         )
         .await
     }
-    pub async fn create_user(&self, request: CreateUserRequest) -> Result<Envelope<UserCreated>, Error> {
-        self.request(Method::POST, "/v1/users", Some(serde_json::to_value(request).map_err(Error::Decode)?)).await
+    pub async fn create_onboarding_session(
+        &self,
+        request: CreateOnboardingSessionRequest,
+    ) -> Result<Envelope<OnboardingSession>, Error> {
+        self.request(
+            Method::POST,
+            "/v1/user-onboarding-sessions",
+            Some(serde_json::to_value(request).map_err(Error::Decode)?),
+        )
+        .await
+    }
+    /// Retrieves the merchant-owned handoff token returned after onboarding starts.
+    pub async fn get_onboarding_session(
+        &self,
+        onboarding_token: &str,
+    ) -> Result<Envelope<OnboardingSessionDetail>, Error> {
+        self.request(
+            Method::GET,
+            &format!(
+                "/v1/user-onboarding-sessions/{}",
+                encode_path(onboarding_token)
+            ),
+            None,
+        )
+        .await
+    }
+    /// Revokes a completed onboarding handoff token. Revoked tokens never expire,
+    /// but can no longer be accepted by the merchant's redirect handler.
+    pub async fn revoke_onboarding_session(
+        &self,
+        onboarding_token: &str,
+    ) -> Result<Envelope<OnboardingTokenRevocation>, Error> {
+        self.request(
+            Method::POST,
+            &format!(
+                "/v1/user-onboarding-sessions/{}/revoke",
+                encode_path(onboarding_token)
+            ),
+            None,
+        )
+        .await
     }
     pub async fn list_users(&self, query: PageQuery) -> Result<UserList, Error> {
-        self.request(Method::GET, &format!("/v1/users?{query}"), None).await
+        self.request(Method::GET, &format!("/v1/users?{query}"), None)
+            .await
     }
     pub async fn get_user(&self, external_user_id: &str) -> Result<Envelope<UserDetail>, Error> {
-        self.request(Method::GET, &format!("/v1/users/{}", encode_path(external_user_id)), None).await
+        self.request(
+            Method::GET,
+            &format!("/v1/users/{}", encode_path(external_user_id)),
+            None,
+        )
+        .await
     }
-    pub async fn get_user_wallet(&self, external_user_id: &str) -> Result<Envelope<UserWalletResponse>, Error> {
-        self.request(Method::GET, &format!("/v1/users/{}/wallet", encode_path(external_user_id)), None).await
+    pub async fn get_user_wallet(
+        &self,
+        external_user_id: &str,
+    ) -> Result<Envelope<UserWalletResponse>, Error> {
+        self.request(
+            Method::GET,
+            &format!("/v1/users/{}/wallet", encode_path(external_user_id)),
+            None,
+        )
+        .await
     }
-    pub async fn topup_user_wallet(&self, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
-        self.mutate_user_wallet("topup", external_user_id, request).await
+    pub async fn topup_user_wallet(
+        &self,
+        external_user_id: &str,
+        request: WalletMutationRequest,
+    ) -> Result<Envelope<WalletMutationResponse>, Error> {
+        self.mutate_user_wallet("topup", external_user_id, request)
+            .await
     }
-    pub async fn debit_user_wallet(&self, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
-        self.mutate_user_wallet("debit", external_user_id, request).await
+    pub async fn debit_user_wallet(
+        &self,
+        external_user_id: &str,
+        request: WalletMutationRequest,
+    ) -> Result<Envelope<WalletMutationResponse>, Error> {
+        self.mutate_user_wallet("debit", external_user_id, request)
+            .await
     }
-    async fn mutate_user_wallet(&self, operation: &str, external_user_id: &str, request: WalletMutationRequest) -> Result<Envelope<WalletMutationResponse>, Error> {
-        self.request(Method::POST, &format!("/v1/users/{}/wallet/{operation}", encode_path(external_user_id)), Some(serde_json::to_value(request).map_err(Error::Decode)?)).await
+    async fn mutate_user_wallet(
+        &self,
+        operation: &str,
+        external_user_id: &str,
+        request: WalletMutationRequest,
+    ) -> Result<Envelope<WalletMutationResponse>, Error> {
+        self.request(
+            Method::POST,
+            &format!(
+                "/v1/users/{}/wallet/{operation}",
+                encode_path(external_user_id)
+            ),
+            Some(serde_json::to_value(request).map_err(Error::Decode)?),
+        )
+        .await
     }
-    pub async fn user_history(&self, external_user_id: &str, query: PageQuery) -> Result<WalletTransactionList, Error> {
-        self.request(Method::GET, &format!("/v1/users/{}/history?{query}", encode_path(external_user_id)), None).await
+    pub async fn user_history(
+        &self,
+        external_user_id: &str,
+        query: PageQuery,
+    ) -> Result<WalletTransactionList, Error> {
+        self.request(
+            Method::GET,
+            &format!(
+                "/v1/users/{}/history?{query}",
+                encode_path(external_user_id)
+            ),
+            None,
+        )
+        .await
     }
-    pub async fn user_wallet_transactions(&self, external_user_id: &str, query: PageQuery) -> Result<WalletTransactionList, Error> {
-        self.request(Method::GET, &format!("/v1/users/{}/wallet/transactions?{query}", encode_path(external_user_id)), None).await
+    pub async fn user_wallet_transactions(
+        &self,
+        external_user_id: &str,
+        query: PageQuery,
+    ) -> Result<WalletTransactionList, Error> {
+        self.request(
+            Method::GET,
+            &format!(
+                "/v1/users/{}/wallet/transactions?{query}",
+                encode_path(external_user_id)
+            ),
+            None,
+        )
+        .await
     }
-    pub async fn lookup_wallet_transaction(&self, external_user_id: &str, reference_id: &str) -> Result<Envelope<WalletTransactionLookup>, Error> {
-        let query = url::form_urlencoded::Serializer::new(String::new()).append_pair("reference_id", reference_id).finish();
-        self.request(Method::GET, &format!("/v1/users/{}/wallet/transactions/by-reference?{query}", encode_path(external_user_id)), None).await
+    pub async fn lookup_wallet_transaction(
+        &self,
+        external_user_id: &str,
+        reference_id: &str,
+    ) -> Result<Envelope<WalletTransactionLookup>, Error> {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("reference_id", reference_id)
+            .finish();
+        self.request(
+            Method::GET,
+            &format!(
+                "/v1/users/{}/wallet/transactions/by-reference?{query}",
+                encode_path(external_user_id)
+            ),
+            None,
+        )
+        .await
     }
     pub async fn get_bill(&self, id: &str) -> Result<Envelope<Bill>, Error> {
         self.request(Method::GET, &format!("/v1/bills/{id}"), None)
             .await
     }
-    pub async fn get_bill_by_external_id(&self, external_id: &str) -> Result<Envelope<Bill>, Error> {
-        self.request(Method::GET, &format!("/v1/bills/by-external-id/{}", encode_path(external_id)), None).await
+    pub async fn get_bill_by_external_id(
+        &self,
+        external_id: &str,
+    ) -> Result<Envelope<Bill>, Error> {
+        self.request(
+            Method::GET,
+            &format!("/v1/bills/by-external-id/{}", encode_path(external_id)),
+            None,
+        )
+        .await
     }
     pub async fn list_bills(&self, query: ListBillsQuery) -> Result<BillList, Error> {
         self.request(Method::GET, &format!("/v1/bills?{query}"), None)
             .await
     }
-    pub async fn list_bills_for_user(&self, external_user_id: &str, query: ListBillsQuery) -> Result<BillList, Error> {
-        self.request_with_external_user_id(Method::GET, &format!("/v1/bills?{query}"), None, Some(external_user_id)).await
+    pub async fn list_bills_for_user(
+        &self,
+        external_user_id: &str,
+        query: ListBillsQuery,
+    ) -> Result<BillList, Error> {
+        self.request_with_external_user_id(
+            Method::GET,
+            &format!("/v1/bills?{query}"),
+            None,
+            Some(external_user_id),
+        )
+        .await
     }
-    pub async fn get_bill_for_user(&self, id: &str, external_user_id: &str) -> Result<Envelope<Bill>, Error> {
-        self.request_with_external_user_id(Method::GET, &format!("/v1/bills/{id}"), None, Some(external_user_id)).await
+    pub async fn get_bill_for_user(
+        &self,
+        id: &str,
+        external_user_id: &str,
+    ) -> Result<Envelope<Bill>, Error> {
+        self.request_with_external_user_id(
+            Method::GET,
+            &format!("/v1/bills/{id}"),
+            None,
+            Some(external_user_id),
+        )
+        .await
     }
-    pub async fn list_user_bills(&self, external_user_id: &str, query: PageQuery) -> Result<BillList, Error> {
-        self.request(Method::GET, &format!("/v1/users/{}/bills?{query}", encode_path(external_user_id)), None).await
+    pub async fn list_user_bills(
+        &self,
+        external_user_id: &str,
+        query: PageQuery,
+    ) -> Result<BillList, Error> {
+        self.request(
+            Method::GET,
+            &format!("/v1/users/{}/bills?{query}", encode_path(external_user_id)),
+            None,
+        )
+        .await
     }
-    pub async fn get_user_bill(&self, external_user_id: &str, id: &str) -> Result<Envelope<Bill>, Error> {
-        self.request(Method::GET, &format!("/v1/users/{}/bills/{id}", encode_path(external_user_id)), None).await
+    pub async fn get_user_bill(
+        &self,
+        external_user_id: &str,
+        id: &str,
+    ) -> Result<Envelope<Bill>, Error> {
+        self.request(
+            Method::GET,
+            &format!("/v1/users/{}/bills/{id}", encode_path(external_user_id)),
+            None,
+        )
+        .await
     }
-    pub async fn create_payout(&self, request: CreatePayoutRequest) -> Result<Envelope<Payout>, Error> {
+    pub async fn create_payout(
+        &self,
+        request: CreatePayoutRequest,
+    ) -> Result<Envelope<Payout>, Error> {
         self.request(
             Method::POST,
             "/v1/payouts",
@@ -305,8 +523,14 @@ impl Client {
         )
         .await
     }
-    pub async fn list_payouts(&self, query: PageQuery) -> Result<PayoutList, Error> { self.request(Method::GET, &format!("/v1/payouts?{query}"), None).await }
-    pub async fn get_payout(&self, id: &str) -> Result<Envelope<Payout>, Error> { self.request(Method::GET, &format!("/v1/payouts/{id}"), None).await }
+    pub async fn list_payouts(&self, query: PageQuery) -> Result<PayoutList, Error> {
+        self.request(Method::GET, &format!("/v1/payouts?{query}"), None)
+            .await
+    }
+    pub async fn get_payout(&self, id: &str) -> Result<Envelope<Payout>, Error> {
+        self.request(Method::GET, &format!("/v1/payouts/{id}"), None)
+            .await
+    }
     pub async fn balance(&self) -> Result<Envelope<Balance>, Error> {
         self.request(Method::GET, "/v1/balance", None).await
     }
@@ -430,7 +654,7 @@ pub struct CreateBillRequest {
     pub description: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateUserRequest {
+pub struct CreateOnboardingSessionRequest {
     pub external_user_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -438,6 +662,7 @@ pub struct CreateUserRequest {
     pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
+    pub redirect_url: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MerchantUser {
@@ -462,9 +687,42 @@ pub struct UserWallet {
     pub currency: Currency,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct UserCreated {
-    pub user: MerchantUser,
-    pub wallet: UserWallet,
+pub struct OnboardingSession {
+    pub session_uuid: String,
+    pub onboarding_token: String,
+    pub webview_url: String,
+    pub status: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OnboardingUser {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OnboardingSessionDetail {
+    pub onboarding_token: String,
+    pub status: String,
+    pub external_user_id: String,
+    pub user: OnboardingUser,
+    pub merchant_user_status: String,
+    pub onboarding_status: String,
+    pub redirect_url: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub completed_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub webview_expires_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub revoked_at: Option<OffsetDateTime>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OnboardingTokenRevocation {
+    pub onboarding_token: String,
+    pub status: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub revoked_at: OffsetDateTime,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserDetail {
@@ -565,8 +823,12 @@ pub struct PageQuery {
 impl fmt::Display for PageQuery {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut query = url::form_urlencoded::Serializer::new(String::new());
-        if let Some(value) = self.page { query.append_pair("page", &value.to_string()); }
-        if let Some(value) = self.per_page { query.append_pair("per_page", &value.to_string()); }
+        if let Some(value) = self.page {
+            query.append_pair("page", &value.to_string());
+        }
+        if let Some(value) = self.per_page {
+            query.append_pair("per_page", &value.to_string());
+        }
         f.write_str(&query.finish())
     }
 }
@@ -624,25 +886,41 @@ pub struct Pagination {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payout {
-    #[serde(default)] pub id: Option<i64>,
+    #[serde(default)]
+    pub id: Option<i64>,
     pub uuid: String,
     pub external_id: String,
     pub amount: Decimal,
     pub fee: Decimal,
     pub status: PayoutStatus,
-    #[serde(default)] pub method: Option<String>,
-    #[serde(default)] pub destination_bank: Option<String>,
-    #[serde(default)] pub destination_account: Option<String>,
-    #[serde(default)] pub destination_name: Option<String>,
-    #[serde(default)] pub description: Option<String>,
-    #[serde(default)] pub bank_reference: Option<String>,
-    #[serde(default)] pub failure_reason: Option<String>,
-    #[serde(default, with = "time::serde::rfc3339::option")] pub created_at: Option<OffsetDateTime>,
-    #[serde(default, with = "time::serde::rfc3339::option")] pub approved_at: Option<OffsetDateTime>,
-    #[serde(default, with = "time::serde::rfc3339::option")] pub paid_at: Option<OffsetDateTime>,
-    #[serde(default, with = "time::serde::rfc3339::option")] pub completed_at: Option<OffsetDateTime>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub destination_bank: Option<String>,
+    #[serde(default)]
+    pub destination_account: Option<String>,
+    #[serde(default)]
+    pub destination_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub bank_reference: Option<String>,
+    #[serde(default)]
+    pub failure_reason: Option<String>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub created_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub approved_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub paid_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub completed_at: Option<OffsetDateTime>,
 }
-#[derive(Debug, Serialize, Deserialize)] pub struct PayoutList { pub data: Vec<Payout>, pub meta: Pagination }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PayoutList {
+    pub data: Vec<Payout>,
+    pub meta: Pagination,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Balance {
     pub merchant_id: i64,
@@ -722,8 +1000,12 @@ impl fmt::Display for ListBillsQuery {
         if let Some(v) = self.per_page {
             query.append_pair("per_page", &v.to_string());
         }
-        if let Some(v) = &self.channel_id { query.append_pair("channel_id", v); }
-        if let Some(v) = &self.search { query.append_pair("search", v); }
+        if let Some(v) = &self.channel_id {
+            query.append_pair("channel_id", v);
+        }
+        if let Some(v) = &self.search {
+            query.append_pair("search", v);
+        }
         f.write_str(&query.finish())
     }
 }

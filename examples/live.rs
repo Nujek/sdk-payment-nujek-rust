@@ -1,8 +1,11 @@
-use std::{env, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    env,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use nujek_payment::{
-    Client, CreateBillRequest, CreatePayoutRequest, CreateUserRequest, Currency, Duration,
-    Error, ListBillsQuery, OffsetDateTime, PageQuery, WalletMutationRequest,
+    Client, CreateBillRequest, CreateOnboardingSessionRequest, CreatePayoutRequest, Currency,
+    Duration, Error, ListBillsQuery, OffsetDateTime, PageQuery, WalletMutationRequest,
 };
 
 fn required(name: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -40,12 +43,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Read-only endpoint checks:");
     report("GET /v1/balance", client.balance().await);
-    report("GET /v1/users", client.list_users(PageQuery { page: Some(1), per_page: Some(20) }).await);
-    report("GET /v1/bills", client.list_bills(ListBillsQuery { page: Some(1), per_page: Some(20), ..Default::default() }).await);
+    report(
+        "GET /v1/users",
+        client
+            .list_users(PageQuery {
+                page: Some(1),
+                per_page: Some(20),
+            })
+            .await,
+    );
+    report(
+        "GET /v1/bills",
+        client
+            .list_bills(ListBillsQuery {
+                page: Some(1),
+                per_page: Some(20),
+                ..Default::default()
+            })
+            .await,
+    );
     report("GET /v1/qris-static", client.list_qris_static().await);
 
     if let Ok(qris_static_id) = env::var("NUJEK_LIVE_TEST_QRIS_STATIC_ID") {
-        report("GET /v1/qris-static/{uuid}", client.get_qris_static(&qris_static_id).await);
+        report(
+            "GET /v1/qris-static/{uuid}",
+            client.get_qris_static(&qris_static_id).await,
+        );
     } else {
         println!("- GET /v1/qris-static/{{uuid}} skipped (set NUJEK_LIVE_TEST_QRIS_STATIC_ID)");
     }
@@ -56,68 +79,192 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    let user_id = format!("SDK-LIVE-{nonce}");
-    let user = report(
-        "POST /v1/users",
-        client.create_user(CreateUserRequest {
-            external_user_id: user_id.clone(),
-            name: Some("SDK live test".into()),
-            email: None,
-            phone: None,
-        }).await,
-    );
-    if user.is_none() {
+    let user_id = match env::var("NUJEK_LIVE_TEST_EXTERNAL_USER_ID") {
+        Ok(user_id) => user_id,
+        Err(_) => {
+            if let Some(session) = report(
+                "POST /v1/user-onboarding-sessions",
+                client
+                    .create_onboarding_session(CreateOnboardingSessionRequest {
+                        external_user_id: format!("SDK-LIVE-{nonce}"),
+                        name: Some("SDK live test".into()),
+                        email: None,
+                        phone: None,
+                        redirect_url: "https://merchant.example.com/onboarding-complete".into(),
+                    })
+                    .await,
+            ) {
+                report(
+                    "GET /v1/user-onboarding-sessions/{onboarding_token}",
+                    client
+                        .get_onboarding_session(&session.data.onboarding_token)
+                        .await,
+                );
+            }
+            println!("- User-wallet checks skipped: complete onboarding first, then set NUJEK_LIVE_TEST_EXTERNAL_USER_ID.");
+            return Ok(());
+        }
+    };
+    if user_id.trim().is_empty() {
+        eprintln!("NUJEK_LIVE_TEST_EXTERNAL_USER_ID must not be empty");
         return Ok(());
     }
 
-    report("GET /v1/users/{external_user_id}", client.get_user(&user_id).await);
-    report("GET /v1/users/{external_user_id}/wallet", client.get_user_wallet(&user_id).await);
-    report("GET /v1/users/{external_user_id}/history", client.user_history(&user_id, PageQuery { page: Some(1), per_page: Some(20) }).await);
-    report("GET /v1/users/{external_user_id}/wallet/transactions", client.user_wallet_transactions(&user_id, PageQuery { page: Some(1), per_page: Some(20) }).await);
-    report("GET /v1/users/{external_user_id}/bills", client.list_user_bills(&user_id, PageQuery { page: Some(1), per_page: Some(20) }).await);
+    if let Ok(onboarding_token) = env::var("NUJEK_LIVE_TEST_ONBOARDING_TOKEN") {
+        report(
+            "GET /v1/user-onboarding-sessions/{onboarding_token}",
+            client.get_onboarding_session(&onboarding_token).await,
+        );
+        if enabled("NUJEK_LIVE_TEST_REVOKE_ONBOARDING_TOKEN") {
+            report(
+                "POST /v1/user-onboarding-sessions/{onboarding_token}/revoke",
+                client.revoke_onboarding_session(&onboarding_token).await,
+            );
+        } else {
+            println!("- Token revoke skipped (set NUJEK_LIVE_TEST_REVOKE_ONBOARDING_TOKEN=true; this is irreversible for that token)");
+        }
+    }
+
+    report(
+        "GET /v1/users/{external_user_id}",
+        client.get_user(&user_id).await,
+    );
+    report(
+        "GET /v1/users/{external_user_id}/wallet",
+        client.get_user_wallet(&user_id).await,
+    );
+    report(
+        "GET /v1/users/{external_user_id}/history",
+        client
+            .user_history(
+                &user_id,
+                PageQuery {
+                    page: Some(1),
+                    per_page: Some(20),
+                },
+            )
+            .await,
+    );
+    report(
+        "GET /v1/users/{external_user_id}/wallet/transactions",
+        client
+            .user_wallet_transactions(
+                &user_id,
+                PageQuery {
+                    page: Some(1),
+                    per_page: Some(20),
+                },
+            )
+            .await,
+    );
+    report(
+        "GET /v1/users/{external_user_id}/bills",
+        client
+            .list_user_bills(
+                &user_id,
+                PageQuery {
+                    page: Some(1),
+                    per_page: Some(20),
+                },
+            )
+            .await,
+    );
 
     let channel_id = env::var("NUJEK_LIVE_TEST_CHANNEL_ID").unwrap_or_else(|_| "NOBU_QRIS".into());
     let bill = report(
         "POST /v1/bills",
-        client.create_bill(CreateBillRequest {
-            external_id: format!("SDK-LIVE-BILL-{nonce}"),
-            channel_id,
-            total: env::var("NUJEK_LIVE_TEST_AMOUNT").unwrap_or_else(|_| "10000".into()).parse()?,
-            currency: Some(Currency::Idr),
-            expired_at: OffsetDateTime::now_utc() + Duration::minutes(15),
-            external_user_id: Some(user_id.clone()),
-            description: Some("SDK live test bill".into()),
-        }).await,
+        client
+            .create_bill(CreateBillRequest {
+                external_id: format!("SDK-LIVE-BILL-{nonce}"),
+                channel_id,
+                total: env::var("NUJEK_LIVE_TEST_AMOUNT")
+                    .unwrap_or_else(|_| "10000".into())
+                    .parse()?,
+                currency: Some(Currency::Idr),
+                expired_at: OffsetDateTime::now_utc() + Duration::minutes(15),
+                external_user_id: Some(user_id.clone()),
+                description: Some("SDK live test bill".into()),
+            })
+            .await,
     );
 
     if let Some(bill) = bill {
         let bill_id = bill.data.uuid;
         report("GET /v1/bills/{bill_uuid}", client.get_bill(&bill_id).await);
-        report("GET /v1/bills + X-External-User-Id", client.list_bills_for_user(&user_id, ListBillsQuery { page: Some(1), per_page: Some(20), ..Default::default() }).await);
-        report("GET /v1/bills/{bill_uuid} + X-External-User-Id", client.get_bill_for_user(&bill_id, &user_id).await);
-        report("GET /v1/users/{external_user_id}/bills/{bill_uuid}", client.get_user_bill(&user_id, &bill_id).await);
+        report(
+            "GET /v1/bills + X-External-User-Id",
+            client
+                .list_bills_for_user(
+                    &user_id,
+                    ListBillsQuery {
+                        page: Some(1),
+                        per_page: Some(20),
+                        ..Default::default()
+                    },
+                )
+                .await,
+        );
+        report(
+            "GET /v1/bills/{bill_uuid} + X-External-User-Id",
+            client.get_bill_for_user(&bill_id, &user_id).await,
+        );
+        report(
+            "GET /v1/users/{external_user_id}/bills/{bill_uuid}",
+            client.get_user_bill(&user_id, &bill_id).await,
+        );
     }
 
     if enabled("NUJEK_LIVE_TEST_WALLET") {
         let amount = "1000".parse()?;
         let reference = format!("SDK-LIVE-WALLET-{nonce}");
-        if report("POST /v1/users/{external_user_id}/wallet/topup", client.topup_user_wallet(&user_id, WalletMutationRequest { amount, reference_id: reference.clone(), description: Some("SDK live test".into()) }).await).is_some() {
-            report("GET /v1/users/{external_user_id}/wallet/transactions/by-reference", client.lookup_wallet_transaction(&user_id, &reference).await);
-            report("POST /v1/users/{external_user_id}/wallet/debit", client.debit_user_wallet(&user_id, WalletMutationRequest { amount, reference_id: format!("{reference}-DEBIT"), description: Some("SDK live test reversal".into()) }).await);
+        if report(
+            "POST /v1/users/{external_user_id}/wallet/topup",
+            client
+                .topup_user_wallet(
+                    &user_id,
+                    WalletMutationRequest {
+                        amount,
+                        reference_id: reference.clone(),
+                        description: Some("SDK live test".into()),
+                    },
+                )
+                .await,
+        )
+        .is_some()
+        {
+            report(
+                "GET /v1/users/{external_user_id}/wallet/transactions/by-reference",
+                client.lookup_wallet_transaction(&user_id, &reference).await,
+            );
+            report(
+                "POST /v1/users/{external_user_id}/wallet/debit",
+                client
+                    .debit_user_wallet(
+                        &user_id,
+                        WalletMutationRequest {
+                            amount,
+                            reference_id: format!("{reference}-DEBIT"),
+                            description: Some("SDK live test reversal".into()),
+                        },
+                    )
+                    .await,
+            );
         }
     } else {
         println!("- Wallet mutation checks skipped (set NUJEK_LIVE_TEST_WALLET=true; these alter balances)");
     }
 
-    let payout = client.create_payout(CreatePayoutRequest {
-        external_id: format!("SDK-LIVE-PAYOUT-{nonce}"),
-        destination_bank: "BCA".into(),
-        destination_account: "0000000000".into(),
-        destination_name: "SDK live test".into(),
-        amount: "1000".parse()?,
-        currency: Some(Currency::Idr),
-        description: Some("SDK live test payout".into()),
-    }).await;
+    let payout = client
+        .create_payout(CreatePayoutRequest {
+            external_id: format!("SDK-LIVE-PAYOUT-{nonce}"),
+            destination_bank: "BCA".into(),
+            destination_account: "0000000000".into(),
+            destination_name: "SDK live test".into(),
+            amount: "1000".parse()?,
+            currency: Some(Currency::Idr),
+            description: Some("SDK live test payout".into()),
+        })
+        .await;
     report("POST /v1/payouts", payout);
 
     Ok(())
